@@ -82,9 +82,9 @@ async def root():
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# 处理文本文件：转换为GBK编码
+# 处理文本文件：转换为GBK编码并生成缩略图
 def process_text_file(contents, filename):
-    """将文本文件转换为GBK编码"""
+    """将文本文件转换为GBK编码并生成缩略图"""
     try:
         # 尝试以UTF-8解码
         text = contents.decode("utf-8")
@@ -97,7 +97,49 @@ def process_text_file(contents, filename):
             text = contents.decode("latin-1")
     
     # 以GBK编码保存
-    return text.encode("gbk")
+    processed_contents = text.encode("gbk")
+    
+    # 生成文本文件的缩略图
+    thumb_size = (150, 150)  # 缩略图尺寸
+    
+    # 创建一个新的150x150像素的白色图像
+    from PIL import ImageDraw, ImageFont
+    import io
+    
+    image = Image.new('L', thumb_size, color=255)  # 创建白色灰度图像
+    draw = ImageDraw.Draw(image)
+    
+    # 使用默认字体
+    try:
+        font = ImageFont.load_default()
+    except Exception:
+        # 如果没有默认字体，使用位图字体
+        font = ImageFont.truetype("/System/Library/Fonts/Monaco.ttf", 12) if os.name == "posix" else ImageFont.load_default()
+    
+    # 计算文本位置
+    margin = 5
+    line_height = 15
+    max_lines = 9  # 150高度，15行高，9行
+    
+    # 显示文件名和前几行内容
+    lines = [f"{filename}"] + text.splitlines()[:max_lines-1]
+    
+    for i, line in enumerate(lines):
+        y = margin + i * line_height
+        draw.text((margin, y), line, fill=0, font=font)
+    
+    # 转换为1bit BMP
+    thumb_bmp = image.point(lambda x: 0 if x < 128 else 255, '1')
+    
+    # 保存缩略图
+    thumb_dir = os.path.join(UPLOAD_DIR, "thumbs")
+    os.makedirs(thumb_dir, exist_ok=True)
+    # 确保缩略图使用.bmp扩展名
+    thumb_filename = os.path.splitext(filename)[0] + ".bmp"
+    thumb_path = os.path.join(thumb_dir, thumb_filename)
+    thumb_bmp.save(thumb_path, format="BMP")
+    
+    return processed_contents
 
 # 处理图片文件：转换为1bit BMP，调整尺寸
 def process_image_file(contents, filename):
@@ -224,26 +266,74 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
     
-    # 如果是图片文件，需要更新缩略图文件名
-    if ext in IMAGE_EXTENSIONS:
-        # 删除原始缩略图
-        old_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", os.path.splitext(original_filename)[0] + ".bmp")
-        if os.path.exists(old_thumb_path):
-            os.remove(old_thumb_path)
-        # 重命名缩略图为时间戳命名
-        new_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", processed_filename)
-        # 从处理后的图片重新生成缩略图
-        # 这里重新生成缩略图以确保文件名一致
-        image = Image.open(io.BytesIO(processed_contents))
-        thumb_size = (150, 150)  # 缩略图尺寸
-        thumbnail = image.copy()
-        thumbnail.thumbnail(thumb_size, Image.LANCZOS)  # 保持宽高比
-        # 转换为灰度图
-        thumb_gray = thumbnail.convert("L")
-        # 转换为1bit BMP
-        thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
-        # 保存缩略图
-        thumb_bmp.save(new_thumb_path, format="BMP")
+    # 更新缩略图文件名（如果是图片或文本文件）
+    if ext in IMAGE_EXTENSIONS or ext == ".txt":
+        # 确保缩略图使用.bmp扩展名
+        if ext in IMAGE_EXTENSIONS:
+            # 图片文件的缩略图使用与主文件相同的扩展名（已统一为.bmp）
+            new_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", processed_filename)
+            # 从处理后的图片重新生成缩略图
+            image = Image.open(io.BytesIO(processed_contents))
+            thumb_size = (150, 150)  # 缩略图尺寸
+            thumbnail = image.copy()
+            thumbnail.thumbnail(thumb_size, Image.LANCZOS)  # 保持宽高比
+            # 转换为灰度图
+            thumb_gray = thumbnail.convert("L")
+            # 转换为1bit BMP
+            thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
+            # 保存缩略图
+            thumb_bmp.save(new_thumb_path, format="BMP")
+            # 删除原始缩略图（如果存在）
+            old_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", os.path.splitext(original_filename)[0] + ".bmp")
+            if os.path.exists(old_thumb_path) and old_thumb_path != new_thumb_path:
+                os.remove(old_thumb_path)
+        elif ext == ".txt":
+            # 文本文件的缩略图使用.bmp扩展名
+            thumb_processed_filename = os.path.splitext(processed_filename)[0] + ".bmp"
+            new_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", thumb_processed_filename)
+            # 获取生成的缩略图路径（使用原始文件名生成的）
+            generated_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", os.path.splitext(original_filename)[0] + ".bmp")
+            if os.path.exists(generated_thumb_path):
+                # 如果生成的缩略图路径和新路径不同，才需要重命名
+                if generated_thumb_path != new_thumb_path:
+                    os.rename(generated_thumb_path, new_thumb_path)
+            else:
+                # 如果生成的缩略图不存在，重新生成
+                # 解码文本内容
+                try:
+                    # 尝试以GBK解码（因为文本文件已转换为GBK）
+                    text = processed_contents.decode("gbk")
+                except UnicodeDecodeError:
+                    text = "无法解析文本"
+                
+                # 生成新的文本缩略图
+                from PIL import ImageDraw, ImageFont
+                
+                image = Image.new('L', (150, 150), color=255)  # 创建白色灰度图像
+                draw = ImageDraw.Draw(image)
+                
+                # 使用默认字体
+                try:
+                    font = ImageFont.load_default()
+                except Exception:
+                    font = ImageFont.truetype("/System/Library/Fonts/Monaco.ttf", 12) if os.name == "posix" else ImageFont.load_default()
+                
+                # 计算文本位置
+                margin = 5
+                line_height = 15
+                max_lines = 9  # 150高度，15行高，9行
+                
+                # 显示文件名和前几行内容
+                lines = [f"{processed_filename}"] + text.splitlines()[:max_lines-1]
+                
+                for i, line in enumerate(lines):
+                    y = margin + i * line_height
+                    draw.text((margin, y), line, fill=0, font=font)
+                
+                # 转换为1bit BMP
+                thumb_bmp = image.point(lambda x: 0 if x < 128 else 255, '1')
+                # 保存缩略图
+                thumb_bmp.save(new_thumb_path, format="BMP")
     
     # 保存文件元数据
     metadata = load_metadata()
@@ -253,10 +343,22 @@ async def upload_file(file: UploadFile = File(...)):
         "size": len(processed_contents),
         "filetype": file_type,
         "upload_time": datetime.datetime.now().isoformat(),
-        "is_image": ext in IMAGE_EXTENSIONS
+        "is_image": ext in IMAGE_EXTENSIONS,
+        "has_thumbnail": ext in IMAGE_EXTENSIONS or ext == ".txt"
     }
     metadata[processed_filename] = file_metadata
     save_metadata(metadata)
+    
+    # 生成缩略图URL
+    if ext in IMAGE_EXTENSIONS or ext == ".txt":
+        if ext == ".txt":
+            # 文本文件的缩略图使用.bmp扩展名
+            thumb_url = f"/files/thumbs/{os.path.splitext(processed_filename)[0]}.bmp"
+        else:
+            # 图片文件的缩略图使用与主文件相同的扩展名
+            thumb_url = f"/files/thumbs/{processed_filename}"
+    else:
+        thumb_url = None
     
     return {
         "original_filename": original_filename,
@@ -264,7 +366,7 @@ async def upload_file(file: UploadFile = File(...)):
         "size": len(processed_contents),
         "filetype": file_type,
         "url": f"/files/{processed_filename}",
-        "thumbnail": f"/files/thumbs/{processed_filename}" if ext in IMAGE_EXTENSIONS else None,
+        "thumbnail": thumb_url,
         "message": "文件上传成功并已处理"
     }
 
@@ -277,7 +379,8 @@ async def get_files():
         
         for filename in os.listdir(UPLOAD_DIR):
             file_path = os.path.join(UPLOAD_DIR, filename)
-            if os.path.isfile(file_path):
+            # 只返回txt和bmp文件
+            if os.path.isfile(file_path) and filename.lower().endswith(('.txt', '.bmp')):
                 file_info = {
                     "filename": filename,
                     "size": os.path.getsize(file_path),
@@ -290,9 +393,16 @@ async def get_files():
                     file_info["filetype"] = metadata[filename]["filetype"]
                     file_info["upload_time"] = metadata[filename]["upload_time"]
                     
-                    # 如果是图片，添加缩略图URL
-                    if metadata[filename]["is_image"]:
-                        file_info["thumbnail"] = f"/files/thumbs/{filename}"
+                    # 如果有缩略图，添加缩略图URL
+                    if metadata[filename].get("has_thumbnail", False):
+                        # 检查文件类型，确保txt文件的缩略图使用.bmp扩展名
+                        if filename.lower().endswith(".txt"):
+                            # 文本文件的缩略图使用.bmp扩展名
+                            thumb_filename = os.path.splitext(filename)[0] + ".bmp"
+                            file_info["thumbnail"] = f"/files/thumbs/{thumb_filename}"
+                        else:
+                            # 其他文件的缩略图使用与主文件相同的扩展名
+                            file_info["thumbnail"] = f"/files/thumbs/{filename}"
                 
                 files.append(file_info)
         
@@ -395,19 +505,65 @@ async def update_file(filename: str, file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件更新失败: {str(e)}")
     
-    # 更新缩略图（如果是图片文件）
-    if ext in IMAGE_EXTENSIONS or ext == ".bmp":
-        thumb_path = os.path.join(UPLOAD_DIR, "thumbs", filename)
-        image = Image.open(io.BytesIO(processed_contents))
-        thumb_size = (150, 150)  # 缩略图尺寸
-        thumbnail = image.copy()
-        thumbnail.thumbnail(thumb_size, Image.LANCZOS)  # 保持宽高比
-        # 转换为灰度图
-        thumb_gray = thumbnail.convert("L")
-        # 转换为1bit BMP
-        thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
-        # 保存缩略图
-        thumb_bmp.save(thumb_path, format="BMP")
+    # 更新缩略图（如果是图片或文本文件）
+    if ext in IMAGE_EXTENSIONS or ext == ".bmp" or ext == ".txt":
+        if ext == ".txt":
+            # 文本文件的缩略图使用.bmp扩展名
+            thumb_filename = os.path.splitext(filename)[0] + ".bmp"
+            thumb_path = os.path.join(UPLOAD_DIR, "thumbs", thumb_filename)
+        else:
+            # 其他文件的缩略图使用与主文件相同的扩展名
+            thumb_path = os.path.join(UPLOAD_DIR, "thumbs", filename)
+        
+        if ext in IMAGE_EXTENSIONS or ext == ".bmp":
+            # 处理图片文件的缩略图
+            image = Image.open(io.BytesIO(processed_contents))
+            thumb_size = (150, 150)  # 缩略图尺寸
+            thumbnail = image.copy()
+            thumbnail.thumbnail(thumb_size, Image.LANCZOS)  # 保持宽高比
+            # 转换为灰度图
+            thumb_gray = thumbnail.convert("L")
+            # 转换为1bit BMP
+            thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
+            # 保存缩略图
+            thumb_bmp.save(thumb_path, format="BMP")
+        elif ext == ".txt":
+            # 处理文本文件的缩略图
+            # 解码文本内容
+            try:
+                # 尝试以GBK解码（因为文本文件已转换为GBK）
+                text = processed_contents.decode("gbk")
+            except UnicodeDecodeError:
+                text = "无法解析文本"
+            
+            # 生成新的文本缩略图
+            from PIL import ImageDraw, ImageFont
+            
+            image = Image.new('L', (150, 150), color=255)  # 创建白色灰度图像
+            draw = ImageDraw.Draw(image)
+            
+            # 使用默认字体
+            try:
+                font = ImageFont.load_default()
+            except Exception:
+                font = ImageFont.truetype("/System/Library/Fonts/Monaco.ttf", 12) if os.name == "posix" else ImageFont.load_default()
+            
+            # 计算文本位置
+            margin = 5
+            line_height = 15
+            max_lines = 9  # 150高度，15行高，9行
+            
+            # 显示文件名和前几行内容
+            lines = [f"{filename}"] + text.splitlines()[:max_lines-1]
+            
+            for i, line in enumerate(lines):
+                y = margin + i * line_height
+                draw.text((margin, y), line, fill=0, font=font)
+            
+            # 转换为1bit BMP
+            thumb_bmp = image.point(lambda x: 0 if x < 128 else 255, '1')
+            # 保存缩略图
+            thumb_bmp.save(thumb_path, format="BMP")
     
     # 更新文件元数据
     metadata = load_metadata()
@@ -418,13 +574,24 @@ async def update_file(filename: str, file: UploadFile = File(...)):
         file_metadata["upload_time"] = datetime.datetime.now().isoformat()
         save_metadata(metadata)
     
+    # 生成缩略图URL
+    if ext in IMAGE_EXTENSIONS or ext == ".bmp" or ext == ".txt":
+        if ext == ".txt":
+            # 文本文件的缩略图使用.bmp扩展名
+            thumb_url = f"/files/thumbs/{os.path.splitext(filename)[0]}.bmp"
+        else:
+            # 图片文件的缩略图使用与主文件相同的扩展名
+            thumb_url = f"/files/thumbs/{filename}"
+    else:
+        thumb_url = None
+    
     return {
         "original_filename": original_filename,
         "filename": filename,
         "size": len(processed_contents),
         "filetype": file_type,
         "url": f"/files/{filename}",
-        "thumbnail": f"/files/thumbs/{filename}" if (ext in IMAGE_EXTENSIONS or ext == ".bmp") else None,
+        "thumbnail": thumb_url,
         "message": "文件更新成功并已处理"
     }
 
@@ -444,7 +611,15 @@ async def delete_file(filename: str):
         os.remove(file_path)
         
         # 删除缩略图（如果存在）
-        thumb_path = os.path.join(UPLOAD_DIR, "thumbs", filename)
+        # 检查文件类型，确保txt文件的缩略图（.bmp扩展名）也被删除
+        if filename.lower().endswith(".txt"):
+            # 文本文件的缩略图使用.bmp扩展名
+            thumb_filename = os.path.splitext(filename)[0] + ".bmp"
+            thumb_path = os.path.join(UPLOAD_DIR, "thumbs", thumb_filename)
+        else:
+            # 其他文件的缩略图使用与主文件相同的扩展名
+            thumb_path = os.path.join(UPLOAD_DIR, "thumbs", filename)
+            
         if os.path.exists(thumb_path):
             os.remove(thumb_path)
         
