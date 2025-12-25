@@ -73,7 +73,7 @@ def process_text_file(contents, filename):
 
 # 处理图片文件：转换为1bit BMP，调整尺寸
 def process_image_file(contents, filename):
-    """处理图片文件：转换为1bit BMP，调整尺寸为480x800"""
+    """处理图片文件：转换为1bit BMP，调整尺寸为480x800，生成缩略图"""
     ext = os.path.splitext(filename)[1].lower()
     
     # 读取图片
@@ -130,6 +130,24 @@ def process_image_file(contents, filename):
     output = io.BytesIO()
     bmp_image.save(output, format="BMP")
     output.seek(0)
+    
+    # 生成缩略图
+    thumb_size = (150, 150)  # 缩略图尺寸
+    thumbnail = image.copy()
+    thumbnail.thumbnail(thumb_size, Image.LANCZOS)  # 保持宽高比
+    
+    # 转换为灰度图
+    thumb_gray = thumbnail.convert("L")
+    
+    # 转换为1bit BMP
+    thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
+    
+    # 保存缩略图
+    thumb_dir = os.path.join(UPLOAD_DIR, "thumbs")
+    os.makedirs(thumb_dir, exist_ok=True)
+    thumb_filename = os.path.splitext(filename)[0] + ".bmp"
+    thumb_path = os.path.join(thumb_dir, thumb_filename)
+    thumb_bmp.save(thumb_path, format="BMP")
     
     return output.getvalue()
 
@@ -228,6 +246,24 @@ async def get_file(filename: str):
             filename=filename,
             media_type="application/octet-stream"
         )
+
+@app.get("/files/thumbs/{filename}", summary="获取缩略图")
+async def get_thumbnail(filename: str):
+    """根据文件名获取缩略图"""
+    thumb_path = os.path.join(UPLOAD_DIR, "thumbs", filename)
+    
+    if not os.path.exists(thumb_path):
+        raise HTTPException(status_code=404, detail="缩略图不存在")
+    
+    if not os.path.isfile(thumb_path):
+        raise HTTPException(status_code=400, detail="路径不是文件")
+    
+    # 返回缩略图
+    return FileResponse(
+        path=thumb_path,
+        filename=filename,
+        media_type="image/bmp"
+    )
 
 @app.put("/files/{filename}", summary="更新文件")
 async def update_file(filename: str, file: UploadFile = File(...)):
