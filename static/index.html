@@ -384,7 +384,7 @@
                 if (['bmp', 'png', 'jpg', 'jpeg', 'webp', 'heic'].includes(ext)) {
                     // 图片文件显示缩略图
                     fileContent = `
-                        <img src="/files/thumbs/${file.filename}" alt="${file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
+                        <img src="/files/thumbs/${file.filename}" alt="${file.original_filename || file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
                     `;
                 } else {
                     // 其他文件显示图标
@@ -395,7 +395,7 @@
                 fileItem.innerHTML = `
                     <div class="file-info">
                         ${fileContent}
-                        <a href="/files/${file.filename}" class="file-name" download>${file.filename}</a>
+                        <a href="/files/${file.filename}" class="file-name" download>${file.original_filename || file.filename}</a>
                         <span class="file-size">(${formatSize(file.size)})</span>
                     </div>
                     <div class="file-actions">
@@ -463,7 +463,12 @@
                 
                 if (['bmp', 'png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
                     // 图片预览
-                    previewContent.innerHTML = `<img class="preview-image" src="/files/${filename}" alt="${filename}">`;
+                    // 查找文件的原始文件名
+                    const files = await axios.get('/files').then(res => res.data.files);
+                    const file = files.find(f => f.filename === filename);
+                    const displayName = file ? (file.original_filename || filename) : filename;
+                    
+                    previewContent.innerHTML = `<img class="preview-image" src="/files/${filename}" alt="${displayName}">`;
                 } else if (ext === 'txt') {
                     // 文本预览
                     const response = await axios.get(`/files/${filename}`, { responseType: 'text' });
@@ -481,7 +486,12 @@
         
         // 删除文件
         async function deleteFile(filename) {
-            if (!confirm(`确定要删除文件 ${filename} 吗？`)) {
+            // 查找文件的原始文件名
+            const files = await axios.get('/files').then(res => res.data.files);
+            const file = files.find(f => f.filename === filename);
+            const displayName = file ? (file.original_filename || filename) : filename;
+            
+            if (!confirm(`确定要删除文件 ${displayName} 吗？`)) {
                 return;
             }
             

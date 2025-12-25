@@ -7,6 +7,7 @@ from PIL import Image
 import io
 import datetime
 import json
+import requests
 
 # 尝试导入pyheif，如果失败则跳过HEIC格式处理
 try:
@@ -632,3 +633,60 @@ async def delete_file(filename: str):
         return {"message": "文件删除成功", "filename": filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件删除失败: {str(e)}")
+
+@app.get("/wallpaper/new", summary="获取新壁纸")
+async def get_new_wallpaper():
+    """从网络获取新壁纸，转换为480x800 1Bit Bitmap格式并保存"""
+    try:
+        # 从Picsum Photos获取随机壁纸（使用免费的public API）
+        wallpaper_url = "https://picsum.photos/1920/1080"
+        response = requests.get(wallpaper_url, timeout=10)
+        response.raise_for_status()
+        
+        # 读取图片内容
+        wallpaper_content = response.content
+        
+        # 使用现有的图片处理函数转换为480x800 1Bit Bitmap格式
+        processed_wallpaper = process_image_file(wallpaper_content, "temp_wallpaper.jpg")
+        
+        # 固定壁纸文件名
+        fixed_wallpaper_name = "wallpaper.bmp"
+        wallpaper_path = os.path.join(UPLOAD_DIR, fixed_wallpaper_name)
+        
+        # 保存壁纸
+        with open(wallpaper_path, "wb") as f:
+            f.write(processed_wallpaper)
+        
+        # 重命名缩略图为正确的名称
+        old_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", "temp_wallpaper.bmp")
+        new_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", fixed_wallpaper_name)
+        if os.path.exists(old_thumb_path):
+            os.rename(old_thumb_path, new_thumb_path)
+        
+        # 保存壁纸元数据
+        metadata = load_metadata()
+        wallpaper_metadata = {
+            "original_filename": "wallpaper.jpg",
+            "processed_filename": fixed_wallpaper_name,
+            "size": len(processed_wallpaper),
+            "filetype": "image/bmp",
+            "upload_time": datetime.datetime.now().isoformat(),
+            "is_image": True,
+            "has_thumbnail": True
+        }
+        metadata[fixed_wallpaper_name] = wallpaper_metadata
+        save_metadata(metadata)
+        
+        # 生成缩略图URL
+        thumb_url = f"/files/thumbs/{fixed_wallpaper_name}"
+        
+        return {
+            "filename": fixed_wallpaper_name,
+            "url": f"/files/{fixed_wallpaper_name}",
+            "thumbnail": thumb_url,
+            "size": len(processed_wallpaper),
+            "filetype": "image/bmp",
+            "message": "新壁纸获取成功并已处理"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取新壁纸失败: {str(e)}")
