@@ -2,6 +2,12 @@
 
 一个基于 FastAPI 的文件管理 API，支持文件上传、查看、删除功能，并对上传的文件进行自动处理。
 
+## 截图
+
+![preview](screenshots/preview.png)
+
+![home](screenshots/home.png)
+
 ## 功能特性
 
 - **文件上传**：支持上传文本文件和图片文件
