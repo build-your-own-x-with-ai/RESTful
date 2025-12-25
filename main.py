@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 import os
 from PIL import Image
 import io
@@ -40,6 +41,18 @@ IMAGE_EXTENSIONS = {".bmp", ".png", ".webp", ".heic", ".jpg", ".jpeg"}
 
 # 确保上传目录存在
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# 创建静态文件目录
+STATIC_DIR = "./static"
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+# 添加根路径路由，返回index.html
+@app.get("/")
+async def root():
+    return HTMLResponse(open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8").read())
+
+# 挂载静态文件目录
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # 处理文本文件：转换为GBK编码
 def process_text_file(contents, filename):
@@ -107,8 +120,11 @@ def process_image_file(contents, filename):
     # 调整图片尺寸
     resized_image = image.resize((new_width, new_height), Image.LANCZOS)
     
-    # 转换为1bit BMP
-    bmp_image = resized_image.convert("1")
+    # 转换为灰度图像
+    gray_image = resized_image.convert("L")
+    
+    # 使用自适应阈值进行二值化处理，提高对比度
+    bmp_image = gray_image.point(lambda x: 0 if x < 128 else 255, '1')
     
     # 保存到字节流
     output = io.BytesIO()
@@ -190,11 +206,28 @@ async def get_file(filename: str):
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=400, detail="路径不是文件")
     
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type="application/octet-stream"
-    )
+    # 根据文件类型设置不同的media_type
+    if filename.lower().endswith(".txt"):
+        # 文本文件使用text/plain类型，并指定GBK编码
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type="text/plain; charset=gbk"
+        )
+    elif filename.lower().endswith(".bmp"):
+        # BMP图片使用image/bmp类型
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type="image/bmp"
+        )
+    else:
+        # 其他文件使用默认类型
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
 
 @app.put("/files/{filename}", summary="更新文件")
 async def update_file(filename: str, file: UploadFile = File(...)):
