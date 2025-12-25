@@ -17,11 +17,38 @@ except ImportError:
     HAS_PYHEIF = False
     print("Warning: pyheif library not available, HEIC format support disabled")
 
+from fastapi.openapi.docs import get_swagger_ui_html
+
 app = FastAPI(
     title="文件管理API",
     description="一个简单的RESTful API，用于上传、查看和删除文件，支持文件格式转换",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_url="/openapi.json",
+    docs_url=None,  # Disable default docs
+    redoc_url=None,  # Disable default redoc
 )
+
+# Custom docs using a different Swagger UI version
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - Swagger UI",
+        swagger_js_url="https://unpkg.com/swagger-ui-dist@4/swagger-ui-bundle.js",
+        swagger_css_url="https://unpkg.com/swagger-ui-dist@4/swagger-ui.css",
+        swagger_favicon_url="https://fastapi.tiangolo.com/img/favicon.png",
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+    )
+
+@app.get("/docs/oauth2-redirect", include_in_schema=False)
+async def swagger_ui_redirect():
+    from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
+    return get_swagger_ui_oauth2_redirect_html()
+
+# 自定义API文档页面
+@app.get("/api-docs", include_in_schema=False)
+async def api_docs():
+    return HTMLResponse(open(os.path.join(STATIC_DIR, "api-docs.html"), encoding="utf-8").read())
 
 # 配置CORS
 app.add_middleware(

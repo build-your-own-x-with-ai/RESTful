@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件管理API - 文档</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .endpoint {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .endpoint h2 {
+            color: #007bff;
+            margin-top: 0;
+        }
+        .method {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .get { background-color: #28a745; }
+        .post { background-color: #007bff; }
+        .put { background-color: #ffc107; color: #333; }
+        .delete { background-color: #dc3545; }
+        .path {
+            font-family: monospace;
+            font-size: 18px;
+            color: #333;
+        }
+        .description {
+            margin: 10px 0;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>文件管理API 文档</h1>
+    <div id="api-docs"></div>
+
+    <script>
+        // 直接获取并显示 API 文档
+        fetch('/openapi.json')
+            .then(response => response.json())
+            .then(data => {
+                const docsDiv = document.getElementById('api-docs');
+                
+                // 遍历所有路径
+                for (const [path, methods] of Object.entries(data.paths)) {
+                    // 遍历路径下的所有方法
+                    for (const [method, details] of Object.entries(methods)) {
+                        // 创建端点卡片
+                        const endpointDiv = document.createElement('div');
+                        endpointDiv.className = 'endpoint';
+                        
+                        // 创建标题行
+                        const titleDiv = document.createElement('div');
+                        
+                        // 方法标签
+                        const methodSpan = document.createElement('span');
+                        methodSpan.className = `method ${method}`;
+                        methodSpan.textContent = method.toUpperCase();
+                        
+                        // 路径
+                        const pathSpan = document.createElement('span');
+                        pathSpan.className = 'path';
+                        pathSpan.textContent = path;
+                        
+                        // 标题
+                        const h2 = document.createElement('h2');
+                        h2.appendChild(methodSpan);
+                        h2.appendChild(pathSpan);
+                        endpointDiv.appendChild(h2);
+                        
+                        // 摘要
+                        if (details.summary) {
+                            const summaryDiv = document.createElement('div');
+                            summaryDiv.className = 'description';
+                            summaryDiv.innerHTML = `<strong>摘要:</strong> ${details.summary}`;
+                            endpointDiv.appendChild(summaryDiv);
+                        }
+                        
+                        // 描述
+                        if (details.description) {
+                            const descriptionDiv = document.createElement('div');
+                            descriptionDiv.className = 'description';
+                            descriptionDiv.innerHTML = `<strong>描述:</strong> ${details.description}`;
+                            endpointDiv.appendChild(descriptionDiv);
+                        }
+                        
+                        // 添加到文档容器
+                        docsDiv.appendChild(endpointDiv);
+                    }
+                }
+            })
+            .catch(error => {
+                document.getElementById('api-docs').innerHTML = 
+                    `<div style="color: red; text-align: center;">加载API文档失败: ${error.message}</div>`;
+            });
+    </script>
+</body>
+</html>
