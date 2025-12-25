@@ -2,10 +2,20 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import os
+from PIL import Image
+import io
+
+# 尝试导入pyheif，如果失败则跳过HEIC格式处理
+try:
+    import pyheif
+    HAS_PYHEIF = True
+except ImportError:
+    HAS_PYHEIF = False
+    print("Warning: pyheif library not available, HEIC format support disabled")
 
 app = FastAPI(
     title="文件管理API",
-    description="一个简单的RESTful API，用于上传、查看和删除文件",
+    description="一个简单的RESTful API，用于上传、查看和删除文件，支持文件格式转换",
     version="1.0.0"
 )
 
@@ -21,30 +31,135 @@ app.add_middleware(
 # 文件存储路径
 UPLOAD_DIR = "./uploads"
 
+# 目标分辨率
+TARGET_WIDTH = 480
+TARGET_HEIGHT = 800
+
+# 支持的图片格式
+IMAGE_EXTENSIONS = {".bmp", ".png", ".webp", ".heic", ".jpg", ".jpeg"}
+
 # 确保上传目录存在
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# 处理文本文件：转换为GBK编码
+def process_text_file(contents, filename):
+    """将文本文件转换为GBK编码"""
+    try:
+        # 尝试以UTF-8解码
+        text = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            # 尝试以GBK解码
+            text = contents.decode("gbk")
+        except UnicodeDecodeError:
+            # 如果都失败，使用Latin-1解码
+            text = contents.decode("latin-1")
+    
+    # 以GBK编码保存
+    return text.encode("gbk")
+
+# 处理图片文件：转换为1bit BMP，调整尺寸
+def process_image_file(contents, filename):
+    """处理图片文件：转换为1bit BMP，调整尺寸为480x800"""
+    ext = os.path.splitext(filename)[1].lower()
+    
+    # 读取图片
+    if ext == ".heic":
+        # 处理HEIC格式
+        if not HAS_PYHEIF:
+            raise HTTPException(status_code=415, detail="HEIC format support is disabled")
+        heif_file = pyheif.read(contents)
+        image = Image.frombytes(
+            heif_file.mode,
+            heif_file.size,
+            heif_file.data,
+            "raw",
+            heif_file.mode,
+            heif_file.stride,
+        )
+    else:
+        # 处理其他图片格式
+        image = Image.open(io.BytesIO(contents))
+    
+    # 转换为RGB模式
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    
+    # 调整尺寸
+    width, height = image.size
+    
+    # 计算新尺寸，保持宽高比
+    if width > height:
+        # 横屏图片，以高度为基准
+        new_height = min(height, TARGET_HEIGHT)
+        new_width = int((new_height / height) * width)
+        if new_width > TARGET_WIDTH:
+            new_width = TARGET_WIDTH
+            new_height = int((new_width / width) * height)
+    else:
+        # 竖屏图片，以宽度为基准
+        new_width = min(width, TARGET_WIDTH)
+        new_height = int((new_width / width) * height)
+        if new_height > TARGET_HEIGHT:
+            new_height = TARGET_HEIGHT
+            new_width = int((new_height / height) * width)
+    
+    # 调整图片尺寸
+    resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+    
+    # 转换为1bit BMP
+    bmp_image = resized_image.convert("1")
+    
+    # 保存到字节流
+    output = io.BytesIO()
+    bmp_image.save(output, format="BMP")
+    output.seek(0)
+    
+    return output.getvalue()
+
 @app.post("/files", summary="上传文件")
 async def upload_file(file: UploadFile = File(...)):
-    """上传一个文件到服务器"""
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    """上传一个文件到服务器，并根据文件类型进行处理"""
+    filename = file.filename
+    ext = os.path.splitext(filename)[1].lower()
+    
+    # 读取文件内容
+    try:
+        contents = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
+    
+    # 根据文件类型进行处理
+    processed_contents = contents
+    processed_filename = filename
+    
+    if ext == ".txt":
+        # 处理文本文件
+        processed_contents = process_text_file(contents, filename)
+    elif ext in IMAGE_EXTENSIONS:
+        # 处理图片文件
+        processed_contents = process_image_file(contents, filename)
+        # 更改文件名为BMP格式
+        processed_filename = os.path.splitext(filename)[0] + ".bmp"
+    
+    # 保存处理后的文件
+    file_path = os.path.join(UPLOAD_DIR, processed_filename)
     
     # 检查文件是否已存在
     if os.path.exists(file_path):
         raise HTTPException(status_code=400, detail="文件已存在")
     
-    # 保存文件
     try:
-        contents = await file.read()
         with open(file_path, "wb") as f:
-            f.write(contents)
+            f.write(processed_contents)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
     
     return {
-        "filename": file.filename,
-        "size": len(contents),
-        "message": "文件上传成功"
+        "original_filename": filename,
+        "processed_filename": processed_filename,
+        "size": len(processed_contents),
+        "message": "文件上传成功并已处理"
     }
 
 @app.get("/files", summary="获取文件列表")
