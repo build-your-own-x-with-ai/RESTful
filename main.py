@@ -5,6 +5,8 @@ from fastapi.staticfiles import StaticFiles
 import os
 from PIL import Image
 import io
+import datetime
+import json
 
 # 尝试导入pyheif，如果失败则跳过HEIC格式处理
 try:
@@ -39,12 +41,38 @@ TARGET_HEIGHT = 800
 # 支持的图片格式
 IMAGE_EXTENSIONS = {".bmp", ".png", ".webp", ".heic", ".jpg", ".jpeg"}
 
+# 文件元数据存储路径
+METADATA_FILE = os.path.join(UPLOAD_DIR, "metadata.json")
+
 # 确保上传目录存在
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 创建静态文件目录
 STATIC_DIR = "./static"
 os.makedirs(STATIC_DIR, exist_ok=True)
+
+# 创建缩略图目录
+os.makedirs(os.path.join(UPLOAD_DIR, "thumbs"), exist_ok=True)
+
+# 加载文件元数据
+def load_metadata():
+    """加载文件元数据"""
+    if not os.path.exists(METADATA_FILE):
+        return {}
+    try:
+        with open(METADATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+# 保存文件元数据
+def save_metadata(metadata):
+    """保存文件元数据"""
+    try:
+        with open(METADATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存元数据失败: {str(e)}")
 
 # 添加根路径路由，返回index.html
 @app.get("/")
@@ -154,8 +182,8 @@ def process_image_file(contents, filename):
 @app.post("/files", summary="上传文件")
 async def upload_file(file: UploadFile = File(...)):
     """上传一个文件到服务器，并根据文件类型进行处理"""
-    filename = file.filename
-    ext = os.path.splitext(filename)[1].lower()
+    original_filename = file.filename
+    ext = os.path.splitext(original_filename)[1].lower()
     
     # 读取文件内容
     try:
@@ -165,23 +193,30 @@ async def upload_file(file: UploadFile = File(...)):
     
     # 根据文件类型进行处理
     processed_contents = contents
-    processed_filename = filename
+    
+    # 生成基于时间戳的唯一文件名
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
     
     if ext == ".txt":
         # 处理文本文件
-        processed_contents = process_text_file(contents, filename)
+        processed_contents = process_text_file(contents, original_filename)
+        # 生成时间戳文件名
+        processed_filename = f"{timestamp}.txt"
+        file_type = "text/plain"
     elif ext in IMAGE_EXTENSIONS:
         # 处理图片文件
-        processed_contents = process_image_file(contents, filename)
-        # 更改文件名为BMP格式
-        processed_filename = os.path.splitext(filename)[0] + ".bmp"
+        # 先获取原始文件的处理结果
+        processed_contents = process_image_file(contents, original_filename)
+        # 生成时间戳文件名，统一为BMP格式
+        processed_filename = f"{timestamp}.bmp"
+        file_type = "image/bmp"
+    else:
+        # 其他文件类型，直接使用时间戳文件名
+        processed_filename = f"{timestamp}{ext}"
+        file_type = "application/octet-stream"
     
     # 保存处理后的文件
     file_path = os.path.join(UPLOAD_DIR, processed_filename)
-    
-    # 检查文件是否已存在
-    if os.path.exists(file_path):
-        raise HTTPException(status_code=400, detail="文件已存在")
     
     try:
         with open(file_path, "wb") as f:
@@ -189,10 +224,47 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
     
-    return {
-        "original_filename": filename,
+    # 如果是图片文件，需要更新缩略图文件名
+    if ext in IMAGE_EXTENSIONS:
+        # 删除原始缩略图
+        old_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", os.path.splitext(original_filename)[0] + ".bmp")
+        if os.path.exists(old_thumb_path):
+            os.remove(old_thumb_path)
+        # 重命名缩略图为时间戳命名
+        new_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", processed_filename)
+        # 从处理后的图片重新生成缩略图
+        # 这里重新生成缩略图以确保文件名一致
+        image = Image.open(io.BytesIO(processed_contents))
+        thumb_size = (150, 150)  # 缩略图尺寸
+        thumbnail = image.copy()
+        thumbnail.thumbnail(thumb_size, Image.LANCZOS)  # 保持宽高比
+        # 转换为灰度图
+        thumb_gray = thumbnail.convert("L")
+        # 转换为1bit BMP
+        thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
+        # 保存缩略图
+        thumb_bmp.save(new_thumb_path, format="BMP")
+    
+    # 保存文件元数据
+    metadata = load_metadata()
+    file_metadata = {
+        "original_filename": original_filename,
         "processed_filename": processed_filename,
         "size": len(processed_contents),
+        "filetype": file_type,
+        "upload_time": datetime.datetime.now().isoformat(),
+        "is_image": ext in IMAGE_EXTENSIONS
+    }
+    metadata[processed_filename] = file_metadata
+    save_metadata(metadata)
+    
+    return {
+        "original_filename": original_filename,
+        "processed_filename": processed_filename,
+        "size": len(processed_contents),
+        "filetype": file_type,
+        "url": f"/files/{processed_filename}",
+        "thumbnail": f"/files/thumbs/{processed_filename}" if ext in IMAGE_EXTENSIONS else None,
         "message": "文件上传成功并已处理"
     }
 
@@ -201,14 +273,29 @@ async def get_files():
     """获取服务器上所有文件的列表"""
     try:
         files = []
+        metadata = load_metadata()
+        
         for filename in os.listdir(UPLOAD_DIR):
             file_path = os.path.join(UPLOAD_DIR, filename)
             if os.path.isfile(file_path):
-                files.append({
+                file_info = {
                     "filename": filename,
                     "size": os.path.getsize(file_path),
-                    "created_at": os.path.getctime(file_path)
-                })
+                    "url": f"/files/{filename}"
+                }
+                
+                # 如果有元数据，添加更多信息
+                if filename in metadata:
+                    file_info["original_filename"] = metadata[filename]["original_filename"]
+                    file_info["filetype"] = metadata[filename]["filetype"]
+                    file_info["upload_time"] = metadata[filename]["upload_time"]
+                    
+                    # 如果是图片，添加缩略图URL
+                    if metadata[filename]["is_image"]:
+                        file_info["thumbnail"] = f"/files/thumbs/{filename}"
+                
+                files.append(file_info)
+        
         return {"files": files}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取文件列表失败: {str(e)}")
@@ -287,13 +374,19 @@ async def update_file(filename: str, file: UploadFile = File(...)):
     
     # 获取文件扩展名
     ext = os.path.splitext(filename)[1].lower()
+    original_filename = file.filename
     
     if ext == ".txt":
         # 处理文本文件
-        processed_contents = process_text_file(contents, filename)
+        processed_contents = process_text_file(contents, original_filename)
+        file_type = "text/plain"
     elif ext in IMAGE_EXTENSIONS or ext == ".bmp":
         # 处理图片文件
-        processed_contents = process_image_file(contents, filename)
+        processed_contents = process_image_file(contents, original_filename)
+        file_type = "image/bmp"
+    else:
+        # 其他文件类型
+        file_type = "application/octet-stream"
     
     # 更新文件
     try:
@@ -302,9 +395,36 @@ async def update_file(filename: str, file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件更新失败: {str(e)}")
     
+    # 更新缩略图（如果是图片文件）
+    if ext in IMAGE_EXTENSIONS or ext == ".bmp":
+        thumb_path = os.path.join(UPLOAD_DIR, "thumbs", filename)
+        image = Image.open(io.BytesIO(processed_contents))
+        thumb_size = (150, 150)  # 缩略图尺寸
+        thumbnail = image.copy()
+        thumbnail.thumbnail(thumb_size, Image.LANCZOS)  # 保持宽高比
+        # 转换为灰度图
+        thumb_gray = thumbnail.convert("L")
+        # 转换为1bit BMP
+        thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
+        # 保存缩略图
+        thumb_bmp.save(thumb_path, format="BMP")
+    
+    # 更新文件元数据
+    metadata = load_metadata()
+    if filename in metadata:
+        file_metadata = metadata[filename]
+        file_metadata["size"] = len(processed_contents)
+        file_metadata["filetype"] = file_type
+        file_metadata["upload_time"] = datetime.datetime.now().isoformat()
+        save_metadata(metadata)
+    
     return {
+        "original_filename": original_filename,
         "filename": filename,
         "size": len(processed_contents),
+        "filetype": file_type,
+        "url": f"/files/{filename}",
+        "thumbnail": f"/files/thumbs/{filename}" if (ext in IMAGE_EXTENSIONS or ext == ".bmp") else None,
         "message": "文件更新成功并已处理"
     }
 
@@ -320,7 +440,20 @@ async def delete_file(filename: str):
         raise HTTPException(status_code=400, detail="路径不是文件")
     
     try:
+        # 删除文件
         os.remove(file_path)
+        
+        # 删除缩略图（如果存在）
+        thumb_path = os.path.join(UPLOAD_DIR, "thumbs", filename)
+        if os.path.exists(thumb_path):
+            os.remove(thumb_path)
+        
+        # 删除元数据
+        metadata = load_metadata()
+        if filename in metadata:
+            del metadata[filename]
+            save_metadata(metadata)
+        
         return {"message": "文件删除成功", "filename": filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件删除失败: {str(e)}")
