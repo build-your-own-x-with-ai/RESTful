@@ -63,7 +63,16 @@ curl -X GET "http://localhost:8000/files"
 curl -X GET "http://localhost:8000/files/filename.txt" -o downloaded_file.txt
 ```
 
-### 4. 删除文件
+### 4. 更新文件
+
+```bash
+curl -X PUT "http://localhost:8000/files/filename.txt" \
+  -H "accept: application/json" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@new_content.txt"
+```
+
+### 5. 删除文件
 
 ```bash
 curl -X DELETE "http://localhost:8000/files/filename.txt"
@@ -76,6 +85,7 @@ curl -X DELETE "http://localhost:8000/files/filename.txt"
 | POST | /files | 上传文件 |
 | GET | /files | 获取文件列表 |
 | GET | /files/{filename} | 下载指定文件 |
+| PUT | /files/{filename} | 更新指定文件 |
 | DELETE | /files/{filename} | 删除指定文件 |
 
 ## 项目结构

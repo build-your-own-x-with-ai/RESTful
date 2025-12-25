@@ -196,6 +196,49 @@ async def get_file(filename: str):
         media_type="application/octet-stream"
     )
 
+@app.put("/files/{filename}", summary="更新文件")
+async def update_file(filename: str, file: UploadFile = File(...)):
+    """更新已存在的文件，保持相同的文件名"""
+    # 检查文件是否已存在
+    existing_file_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(existing_file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    if not os.path.isfile(existing_file_path):
+        raise HTTPException(status_code=400, detail="路径不是文件")
+    
+    # 读取文件内容
+    try:
+        contents = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
+    
+    # 根据文件类型进行处理
+    processed_contents = contents
+    
+    # 获取文件扩展名
+    ext = os.path.splitext(filename)[1].lower()
+    
+    if ext == ".txt":
+        # 处理文本文件
+        processed_contents = process_text_file(contents, filename)
+    elif ext in IMAGE_EXTENSIONS or ext == ".bmp":
+        # 处理图片文件
+        processed_contents = process_image_file(contents, filename)
+    
+    # 更新文件
+    try:
+        with open(existing_file_path, "wb") as f:
+            f.write(processed_contents)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件更新失败: {str(e)}")
+    
+    return {
+        "filename": filename,
+        "size": len(processed_contents),
+        "message": "文件更新成功并已处理"
+    }
+
 @app.delete("/files/{filename}", summary="删除文件")
 async def delete_file(filename: str):
     """根据文件名删除文件"""
