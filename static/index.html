@@ -88,6 +88,19 @@
             cursor: not-allowed;
         }
         
+        #wallpaperBtn {
+            background-color: #9b59b6;
+        }
+        
+        #wallpaperBtn:hover {
+            background-color: #8e44ad;
+        }
+        
+        #wallpaperBtn:disabled {
+            background-color: #d2b4de;
+            cursor: not-allowed;
+        }
+        
         .files-section {
             background-color: white;
             padding: 30px;
@@ -317,7 +330,10 @@
             <h2>上传文件</h2>
             <form class="upload-form" id="uploadForm">
                 <input type="file" class="file-input" id="fileInput" required>
-                <button type="submit" class="upload-btn" id="uploadBtn">上传文件</button>
+                <div style="display: flex; gap: 10px;">
+                    <button type="submit" class="upload-btn" id="uploadBtn" style="flex: 1;">上传文件</button>
+                    <button type="button" class="upload-btn" id="wallpaperBtn" style="flex: 1; background-color: #9b59b6;" onclick="getNewWallpaper()">获取新壁纸</button>
+                </div>
             </form>
         </div>
         
@@ -506,6 +522,24 @@
                 fetchFiles();
             } catch (error) {
                 showMessage('文件删除失败: ' + (error.response?.data?.detail || error.message), true);
+            }
+        }
+        
+        // 获取新壁纸
+        async function getNewWallpaper() {
+            const wallpaperBtn = document.getElementById('wallpaperBtn');
+            wallpaperBtn.disabled = true;
+            wallpaperBtn.textContent = '获取中...';
+            
+            try {
+                const response = await axios.get('/wallpaper/new');
+                showMessage('新壁纸获取成功');
+                fetchFiles();
+            } catch (error) {
+                showMessage('获取新壁纸失败: ' + (error.response?.data?.detail || error.message), true);
+            } finally {
+                wallpaperBtn.disabled = false;
+                wallpaperBtn.textContent = '获取新壁纸';
             }
         }
         
