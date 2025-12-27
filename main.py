@@ -198,6 +198,74 @@ def process_text_file(contents, filename):
     
     return processed_contents
 
+# 处理壁纸文件：使用aspectFill模式填满480x800
+def process_wallpaper_file(contents):
+    """处理壁纸文件：使用aspectFill模式填满480x800，转换为1bit BMP"""
+    # 读取图片
+    image = Image.open(io.BytesIO(contents))
+    
+    # 转换为RGB模式
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    
+    # 目标尺寸
+    target_width = TARGET_WIDTH  # 480
+    target_height = TARGET_HEIGHT  # 800
+    
+    # 计算缩放比例（aspectFill模式）
+    width, height = image.size
+    scale_w = target_width / width
+    scale_h = target_height / height
+    
+    # 选择较大的缩放比例，确保填满整个区域
+    scale = max(scale_w, scale_h)
+    
+    # 计算缩放后的尺寸
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+    
+    # 缩放图片
+    resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+    
+    # 计算裁剪位置（居中裁剪）
+    left = (new_width - target_width) // 2
+    top = (new_height - target_height) // 2
+    right = left + target_width
+    bottom = top + target_height
+    
+    # 裁剪图片
+    cropped_image = resized_image.crop((left, top, right, bottom))
+    
+    # 转换为灰度图像
+    gray_image = cropped_image.convert("L")
+    
+    # 使用自适应阈值进行二值化处理
+    bmp_image = gray_image.point(lambda x: 0 if x < 128 else 255, '1')
+    
+    # 保存到字节流
+    output = io.BytesIO()
+    bmp_image.save(output, format="BMP")
+    output.seek(0)
+    
+    # 生成缩略图
+    thumb_size = (150, 150)
+    thumbnail = cropped_image.copy()
+    thumbnail.thumbnail(thumb_size, Image.LANCZOS)
+    
+    # 转换为灰度图
+    thumb_gray = thumbnail.convert("L")
+    
+    # 转换为1bit BMP
+    thumb_bmp = thumb_gray.point(lambda x: 0 if x < 128 else 255, '1')
+    
+    # 保存缩略图
+    thumb_dir = os.path.join(UPLOAD_DIR, "thumbs")
+    os.makedirs(thumb_dir, exist_ok=True)
+    thumb_path = os.path.join(thumb_dir, "wallpaper.bmp")
+    thumb_bmp.save(thumb_path, format="BMP")
+    
+    return output.getvalue()
+
 # 处理图片文件：转换为1bit BMP，调整尺寸
 def process_image_file(contents, filename):
     """处理图片文件：转换为1bit BMP，调整尺寸为480x800，生成缩略图"""
@@ -756,8 +824,8 @@ async def get_new_wallpaper():
         # 读取图片内容
         wallpaper_content = response.content
         
-        # 使用现有的图片处理函数转换为480x800 1Bit Bitmap格式
-        processed_wallpaper = process_image_file(wallpaper_content, "temp_wallpaper.jpg")
+        # 使用专门的壁纸处理函数转换为480x800 1Bit Bitmap格式（aspectFill模式）
+        processed_wallpaper = process_wallpaper_file(wallpaper_content)
         
         # 固定壁纸文件名
         fixed_wallpaper_name = "wallpaper.bmp"
@@ -766,12 +834,6 @@ async def get_new_wallpaper():
         # 保存壁纸
         with open(wallpaper_path, "wb") as f:
             f.write(processed_wallpaper)
-        
-        # 重命名缩略图为正确的名称
-        old_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", "temp_wallpaper.bmp")
-        new_thumb_path = os.path.join(UPLOAD_DIR, "thumbs", fixed_wallpaper_name)
-        if os.path.exists(old_thumb_path):
-            os.rename(old_thumb_path, new_thumb_path)
         
         # 保存壁纸元数据
         metadata = load_metadata()
@@ -798,5 +860,7 @@ async def get_new_wallpaper():
             "filetype": "image/bmp",
             "message": "新壁纸获取成功并已处理"
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取新壁纸失败: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取新壁纸失败: {str(e)}")
