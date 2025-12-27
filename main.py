@@ -82,6 +82,31 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 # 创建缩略图目录
 os.makedirs(os.path.join(UPLOAD_DIR, "thumbs"), exist_ok=True)
 
+# 加载中文字体的辅助函数
+def load_chinese_font(size=12):
+    """尝试加载中文字体，支持多个平台"""
+    font_paths = [
+        "/System/Library/Fonts/PingFang.ttc",  # macOS
+        "/System/Library/Fonts/STHeiti Light.ttc",  # macOS
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # Linux
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  # Linux
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # Linux
+        "C:\\Windows\\Fonts\\msyh.ttc",  # Windows
+        "C:\\Windows\\Fonts\\simsun.ttc",  # Windows
+    ]
+    
+    for font_path in font_paths:
+        try:
+            return ImageFont.truetype(font_path, size)
+        except Exception:
+            continue
+    
+    # 如果没有找到字体，使用默认字体
+    try:
+        return ImageFont.load_default()
+    except Exception:
+        return ImageFont.load_default()
+
 # 加载文件元数据
 def load_metadata():
     """加载文件元数据"""
@@ -140,14 +165,8 @@ def process_text_file(contents, filename):
     image = Image.new('L', thumb_size, color=255)  # 创建白色灰度图像
     draw = ImageDraw.Draw(image)
     
-    # 使用中文字体
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 12)
-    except Exception:
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", 12)
-        except Exception:
-            font = ImageFont.load_default()
+    # 加载中文字体
+    font = load_chinese_font(12)
     
     # 文件名自动换行显示
     max_width = thumb_size[0] - 10  # 左右各留5px边距
@@ -157,8 +176,15 @@ def process_text_file(contents, filename):
     
     for char in words:
         test_line = current_line + char
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        line_width = bbox[2] - bbox[0]
+        try:
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            line_width = bbox[2] - bbox[0]
+        except Exception:
+            # 如果textbbox失败，使用textsize（旧版PIL）
+            try:
+                line_width = draw.textsize(test_line, font=font)[0]
+            except Exception:
+                line_width = len(test_line) * 6  # 估算宽度
         
         if line_width <= max_width:
             current_line = test_line
@@ -179,8 +205,15 @@ def process_text_file(contents, filename):
     
     # 绘制每一行
     for i, line in enumerate(lines):
-        bbox = draw.textbbox((0, 0), line, font=font)
-        text_width = bbox[2] - bbox[0]
+        try:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            text_width = bbox[2] - bbox[0]
+        except Exception:
+            try:
+                text_width = draw.textsize(line, font=font)[0]
+            except Exception:
+                text_width = len(line) * 6
+        
         x = (thumb_size[0] - text_width) // 2
         y = start_y + i * line_height
         draw.text((x, y), line, fill=0, font=font)
@@ -437,14 +470,8 @@ async def upload_file(file: UploadFile = File(...)):
                 image = Image.new('L', (120, 200), color=255)  # 创建白色灰度图像
                 draw = ImageDraw.Draw(image)
                 
-                # 使用中文字体
-                try:
-                    font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 12)
-                except Exception:
-                    try:
-                        font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", 12)
-                    except Exception:
-                        font = ImageFont.load_default()
+                # 加载中文字体
+                font = load_chinese_font(12)
                 
                 # 文件名自动换行显示
                 max_width = 110  # 左右各留5px边距
@@ -454,8 +481,14 @@ async def upload_file(file: UploadFile = File(...)):
                 
                 for char in words:
                     test_line = current_line + char
-                    bbox = draw.textbbox((0, 0), test_line, font=font)
-                    line_width = bbox[2] - bbox[0]
+                    try:
+                        bbox = draw.textbbox((0, 0), test_line, font=font)
+                        line_width = bbox[2] - bbox[0]
+                    except Exception:
+                        try:
+                            line_width = draw.textsize(test_line, font=font)[0]
+                        except Exception:
+                            line_width = len(test_line) * 6
                     
                     if line_width <= max_width:
                         current_line = test_line
@@ -476,8 +509,14 @@ async def upload_file(file: UploadFile = File(...)):
                 
                 # 绘制每一行
                 for i, line in enumerate(lines):
-                    bbox = draw.textbbox((0, 0), line, font=font)
-                    text_width = bbox[2] - bbox[0]
+                    try:
+                        bbox = draw.textbbox((0, 0), line, font=font)
+                        text_width = bbox[2] - bbox[0]
+                    except Exception:
+                        try:
+                            text_width = draw.textsize(line, font=font)[0]
+                        except Exception:
+                            text_width = len(line) * 6
                     x = (120 - text_width) // 2
                     y = start_y + i * line_height
                     draw.text((x, y), line, fill=0, font=font)
@@ -694,14 +733,8 @@ async def update_file(filename: str, file: UploadFile = File(...)):
             image = Image.new('L', (120, 200), color=255)  # 创建白色灰度图像
             draw = ImageDraw.Draw(image)
             
-            # 使用中文字体
-            try:
-                font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 12)
-            except Exception:
-                try:
-                    font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", 12)
-                except Exception:
-                    font = ImageFont.load_default()
+            # 加载中文字体
+            font = load_chinese_font(12)
             
             # 文件名自动换行显示
             max_width = 110  # 左右各留5px边距
@@ -711,8 +744,14 @@ async def update_file(filename: str, file: UploadFile = File(...)):
             
             for char in words:
                 test_line = current_line + char
-                bbox = draw.textbbox((0, 0), test_line, font=font)
-                line_width = bbox[2] - bbox[0]
+                try:
+                    bbox = draw.textbbox((0, 0), test_line, font=font)
+                    line_width = bbox[2] - bbox[0]
+                except Exception:
+                    try:
+                        line_width = draw.textsize(test_line, font=font)[0]
+                    except Exception:
+                        line_width = len(test_line) * 6
                 
                 if line_width <= max_width:
                     current_line = test_line
@@ -733,8 +772,14 @@ async def update_file(filename: str, file: UploadFile = File(...)):
             
             # 绘制每一行
             for i, line in enumerate(lines):
-                bbox = draw.textbbox((0, 0), line, font=font)
-                text_width = bbox[2] - bbox[0]
+                try:
+                    bbox = draw.textbbox((0, 0), line, font=font)
+                    text_width = bbox[2] - bbox[0]
+                except Exception:
+                    try:
+                        text_width = draw.textsize(line, font=font)[0]
+                    except Exception:
+                        text_width = len(line) * 6
                 x = (120 - text_width) // 2
                 y = start_y + i * line_height
                 draw.text((x, y), line, fill=0, font=font)
