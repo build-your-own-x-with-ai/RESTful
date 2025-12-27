@@ -398,14 +398,16 @@
                 
                 let fileContent;
                 if (['bmp', 'png', 'jpg', 'jpeg', 'webp', 'heic'].includes(ext)) {
-                    // 图片文件显示缩略图
+                    // 图片文件显示缩略图，添加时间戳避免缓存
+                    const timestamp = file.upload_time ? new Date(file.upload_time).getTime() : Date.now();
                     fileContent = `
-                        <img src="/files/thumbs/${file.filename}" alt="${file.original_filename || file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
+                        <img src="/files/thumbs/${file.filename}?t=${timestamp}" alt="${file.original_filename || file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
                     `;
                 } else if (ext === 'txt' && file.thumbnail) {
-                    // txt文件也显示缩略图
+                    // txt文件也显示缩略图，添加时间戳避免缓存
+                    const timestamp = file.upload_time ? new Date(file.upload_time).getTime() : Date.now();
                     fileContent = `
-                        <img src="${file.thumbnail}" alt="${file.original_filename || file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
+                        <img src="${file.thumbnail}?t=${timestamp}" alt="${file.original_filename || file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
                     `;
                 } else {
                     // 其他文件显示图标
