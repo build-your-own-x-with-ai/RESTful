@@ -386,9 +386,14 @@
                     fileContent = `
                         <img src="/files/thumbs/${file.filename}" alt="${file.original_filename || file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
                     `;
+                } else if (ext === 'txt' && file.thumbnail) {
+                    // txt文件也显示缩略图
+                    fileContent = `
+                        <img src="${file.thumbnail}" alt="${file.original_filename || file.filename}" class="thumb-image" onclick="previewFile('${file.filename}')">
+                    `;
                 } else {
                     // 其他文件显示图标
-                    let icon = '�';
+                    let icon = '📄';
                     fileContent = `<span class="file-icon">${icon}</span>`;
                 }
                 

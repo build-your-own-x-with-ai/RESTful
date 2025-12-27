@@ -124,40 +124,69 @@ def process_text_file(contents, filename):
             # 如果都失败，使用Latin-1解码
             text = contents.decode("latin-1")
     
-    # 以GBK编码保存
-    processed_contents = text.encode("gbk")
+    # 移除BOM字符（如果存在）
+    text = text.lstrip('\ufeff')
+    
+    # 以GBK编码保存，忽略无法编码的字符
+    processed_contents = text.encode("gbk", errors="ignore")
     
     # 生成文本文件的缩略图
-    thumb_size = (150, 150)  # 缩略图尺寸
+    thumb_size = (120, 200)  # 缩略图尺寸
     
-    # 创建一个新的150x150像素的白色图像
+    # 创建一个新的120x200像素的白色图像
     from PIL import ImageDraw, ImageFont
     import io
     
     image = Image.new('L', thumb_size, color=255)  # 创建白色灰度图像
     draw = ImageDraw.Draw(image)
     
-    # 使用默认字体
+    # 使用中文字体
     try:
-        font = ImageFont.load_default()
+        font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 12)
     except Exception:
-        # 如果没有默认字体，使用位图字体
-        font = ImageFont.truetype("/System/Library/Fonts/Monaco.ttf", 12) if os.name == "posix" else ImageFont.load_default()
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", 12)
+        except Exception:
+            font = ImageFont.load_default()
     
-    # 计算文本位置
-    margin = 5
-    line_height = 15
-    max_lines = 9  # 150高度，15行高，9行
+    # 文件名自动换行显示
+    max_width = thumb_size[0] - 10  # 左右各留5px边距
+    lines = []
+    words = list(filename)  # 将文件名拆分为字符
+    current_line = ""
     
-    # 显示文件名和前几行内容
-    lines = [f"{filename}"] + text.splitlines()[:max_lines-1]
+    for char in words:
+        test_line = current_line + char
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        line_width = bbox[2] - bbox[0]
+        
+        if line_width <= max_width:
+            current_line = test_line
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = char
     
+    if current_line:
+        lines.append(current_line)
+    
+    # 计算总高度
+    line_height = 16
+    total_height = len(lines) * line_height
+    
+    # 计算起始Y位置（居中）
+    start_y = (thumb_size[1] - total_height) // 2
+    
+    # 绘制每一行
     for i, line in enumerate(lines):
-        y = margin + i * line_height
-        draw.text((margin, y), line, fill=0, font=font)
+        bbox = draw.textbbox((0, 0), line, font=font)
+        text_width = bbox[2] - bbox[0]
+        x = (thumb_size[0] - text_width) // 2
+        y = start_y + i * line_height
+        draw.text((x, y), line, fill=0, font=font)
     
-    # 转换为1bit BMP
-    thumb_bmp = image.point(lambda x: 0 if x < 128 else 255, '1')
+    # 使用Floyd-Steinberg抖动算法转换为1bit BMP
+    thumb_bmp = image.convert('1', dither=Image.FLOYDSTEINBERG)
     
     # 保存缩略图
     thumb_dir = os.path.join(UPLOAD_DIR, "thumbs")
@@ -337,29 +366,56 @@ async def upload_file(file: UploadFile = File(...)):
                 # 生成新的文本缩略图
                 from PIL import ImageDraw, ImageFont
                 
-                image = Image.new('L', (150, 150), color=255)  # 创建白色灰度图像
+                image = Image.new('L', (120, 200), color=255)  # 创建白色灰度图像
                 draw = ImageDraw.Draw(image)
                 
-                # 使用默认字体
+                # 使用中文字体
                 try:
-                    font = ImageFont.load_default()
+                    font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 12)
                 except Exception:
-                    font = ImageFont.truetype("/System/Library/Fonts/Monaco.ttf", 12) if os.name == "posix" else ImageFont.load_default()
+                    try:
+                        font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", 12)
+                    except Exception:
+                        font = ImageFont.load_default()
                 
-                # 计算文本位置
-                margin = 5
-                line_height = 15
-                max_lines = 9  # 150高度，15行高，9行
+                # 文件名自动换行显示
+                max_width = 110  # 左右各留5px边距
+                lines = []
+                words = list(processed_filename)  # 将文件名拆分为字符
+                current_line = ""
                 
-                # 显示文件名和前几行内容
-                lines = [f"{processed_filename}"] + text.splitlines()[:max_lines-1]
+                for char in words:
+                    test_line = current_line + char
+                    bbox = draw.textbbox((0, 0), test_line, font=font)
+                    line_width = bbox[2] - bbox[0]
+                    
+                    if line_width <= max_width:
+                        current_line = test_line
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                        current_line = char
                 
+                if current_line:
+                    lines.append(current_line)
+                
+                # 计算总高度
+                line_height = 16
+                total_height = len(lines) * line_height
+                
+                # 计算起始Y位置（居中）
+                start_y = (200 - total_height) // 2
+                
+                # 绘制每一行
                 for i, line in enumerate(lines):
-                    y = margin + i * line_height
-                    draw.text((margin, y), line, fill=0, font=font)
+                    bbox = draw.textbbox((0, 0), line, font=font)
+                    text_width = bbox[2] - bbox[0]
+                    x = (120 - text_width) // 2
+                    y = start_y + i * line_height
+                    draw.text((x, y), line, fill=0, font=font)
                 
-                # 转换为1bit BMP
-                thumb_bmp = image.point(lambda x: 0 if x < 128 else 255, '1')
+                # 使用Floyd-Steinberg抖动算法转换为1bit BMP
+                thumb_bmp = image.convert('1', dither=Image.FLOYDSTEINBERG)
                 # 保存缩略图
                 thumb_bmp.save(new_thumb_path, format="BMP")
     
@@ -567,29 +623,56 @@ async def update_file(filename: str, file: UploadFile = File(...)):
             # 生成新的文本缩略图
             from PIL import ImageDraw, ImageFont
             
-            image = Image.new('L', (150, 150), color=255)  # 创建白色灰度图像
+            image = Image.new('L', (120, 200), color=255)  # 创建白色灰度图像
             draw = ImageDraw.Draw(image)
             
-            # 使用默认字体
+            # 使用中文字体
             try:
-                font = ImageFont.load_default()
+                font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 12)
             except Exception:
-                font = ImageFont.truetype("/System/Library/Fonts/Monaco.ttf", 12) if os.name == "posix" else ImageFont.load_default()
+                try:
+                    font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", 12)
+                except Exception:
+                    font = ImageFont.load_default()
             
-            # 计算文本位置
-            margin = 5
-            line_height = 15
-            max_lines = 9  # 150高度，15行高，9行
+            # 文件名自动换行显示
+            max_width = 110  # 左右各留5px边距
+            lines = []
+            words = list(filename)  # 将文件名拆分为字符
+            current_line = ""
             
-            # 显示文件名和前几行内容
-            lines = [f"{filename}"] + text.splitlines()[:max_lines-1]
+            for char in words:
+                test_line = current_line + char
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                line_width = bbox[2] - bbox[0]
+                
+                if line_width <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = char
             
+            if current_line:
+                lines.append(current_line)
+            
+            # 计算总高度
+            line_height = 16
+            total_height = len(lines) * line_height
+            
+            # 计算起始Y位置（居中）
+            start_y = (200 - total_height) // 2
+            
+            # 绘制每一行
             for i, line in enumerate(lines):
-                y = margin + i * line_height
-                draw.text((margin, y), line, fill=0, font=font)
+                bbox = draw.textbbox((0, 0), line, font=font)
+                text_width = bbox[2] - bbox[0]
+                x = (120 - text_width) // 2
+                y = start_y + i * line_height
+                draw.text((x, y), line, fill=0, font=font)
             
-            # 转换为1bit BMP
-            thumb_bmp = image.point(lambda x: 0 if x < 128 else 255, '1')
+            # 使用Floyd-Steinberg抖动算法转换为1bit BMP
+            thumb_bmp = image.convert('1', dither=Image.FLOYDSTEINBERG)
             # 保存缩略图
             thumb_bmp.save(thumb_path, format="BMP")
     
